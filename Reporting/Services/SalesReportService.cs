@@ -1,16 +1,23 @@
 ﻿using Reporting.Models;
 using Reporting.Sql;
 using System.Data;
+using static System.Net.WebRequestMethods;
 
 namespace Reporting.Services
 {
     public class SalesReportService
     {
-        private readonly SqlHelper sql;
+       
+        private readonly string _connectionString;
 
-        public SalesReportService(string connectionString)
+        private readonly string _firmaNo;
+        private readonly string _donemNo;
+
+        public SalesReportService(string connectionString, string firmaNo, string donemNo)
         {
-            sql = new SqlHelper(connectionString);
+            _connectionString = connectionString;
+            _firmaNo = firmaNo;
+            _donemNo = donemNo;
         }
 
         public List<SalesProfitReportRow> SatisKarZarar(ReportFilter filter)
@@ -28,7 +35,7 @@ namespace Reporting.Services
         {
             List<StockMovementRow> liste = new List<StockMovementRow>();
 
-            sql.sorgu = @"
+            string query = @"
                 SELECT
                     L.LOGICALREF AS LogicalRef,
                     L.STOCKREF AS StockRef,
@@ -69,7 +76,10 @@ namespace Reporting.Services
                     L.LOGICALREF
             ";
 
+            SqlHelper sql = new SqlHelper(_connectionString);
+            sql.sorgu = query;
             DataTable dt = sql.selectDataTable();
+
 
             foreach (DataRow dr in dt.Rows)
             {
@@ -174,8 +184,11 @@ namespace Reporting.Services
 
             periyot = string.IsNullOrWhiteSpace(periyot) ? "gunluk" : periyot;
 
-            List<SalesProfitReportRow> seciliListe = PeriyodaGoreFiltrele(liste, periyot);
-            List<SalesProfitReportRow> oncekiListe = OncekiPeriyodaGoreFiltrele(liste, periyot);
+            //List<SalesProfitReportRow> seciliListe = PeriyodaGoreFiltrele(liste, periyot);
+            //List<SalesProfitReportRow> oncekiListe = OncekiPeriyodaGoreFiltrele(liste, periyot);
+
+            List<SalesProfitReportRow> seciliListe = PeriyodaGoreFiltrele(liste, filter);
+            List<SalesProfitReportRow> oncekiListe = OncekiPeriyodaGoreFiltrele(liste, filter);
 
             return new SalesReportDashboardModel
             {
@@ -190,9 +203,16 @@ namespace Reporting.Services
                     OranHesapla(oncekiListe.Sum(x => x.Kar), oncekiListe.Sum(x => x.Ciro))
                 ),
 
-                RaporSatirlari = OzetRaporOlustur(liste, periyot)
+                //RaporSatirlari = OzetRaporOlustur(liste, filter.Periyot)
+                RaporSatirlari = OzetRaporOlustur(
+                    filter.Periyot == "ozel" ? seciliListe : liste,
+                    filter.Periyot
+                )
             };
+
         }
+
+      
 
         public ProductProfitReportViewModel UrunKarlilikRaporu(ReportFilter filter)
         {
@@ -202,7 +222,8 @@ namespace Reporting.Services
 
             List<SalesProfitReportRow> satislar = SatisKarZarar(filter);
 
-            satislar = PeriyodaGoreFiltrele(satislar, periyot);
+            //satislar = PeriyodaGoreFiltrele(satislar, periyot);
+            satislar = PeriyodaGoreFiltrele(satislar, filter);
 
             List<ProductProfitReportRow> urunler = satislar
                 .GroupBy(x => new
@@ -245,7 +266,8 @@ namespace Reporting.Services
 
             List<SalesProfitReportRow> satislar = SatisKarZarar(filter);
 
-            satislar = PeriyodaGoreFiltrele(satislar, periyot);
+            //satislar = PeriyodaGoreFiltrele(satislar, periyot);
+            satislar = PeriyodaGoreFiltrele(satislar, filter);
 
             List<CustomerProfitReportRow> musteriler = satislar
                 .GroupBy(x => new
@@ -279,93 +301,6 @@ namespace Reporting.Services
             };
         }
 
-        public InventoryReportViewModel EnvanterRaporu()
-        {
-            decimal kritikSeviye = 10;
-
-            List<InventoryReportRow> stoklar = new List<InventoryReportRow>();
-
-            sql.sorgu = @"
-                SELECT
-                    IT.LOGICALREF AS StockRef,
-                    IT.CODE AS StokKodu,
-                    IT.NAME AS StokAdi,
-
-                    SUM(CASE WHEN L.TRCODE = 1 THEN ISNULL(L.AMOUNT, 0) ELSE 0 END) AS GirenMiktar,
-
-                    SUM(CASE WHEN L.TRCODE IN (7,8) THEN ISNULL(L.AMOUNT, 0) ELSE 0 END) AS CikanMiktar,
-
-                    SUM(CASE WHEN L.TRCODE = 1 THEN ISNULL(L.AMOUNT, 0) ELSE 0 END)
-                    -
-                    SUM(CASE WHEN L.TRCODE IN (7,8) THEN ISNULL(L.AMOUNT, 0) ELSE 0 END) AS MevcutStok,
-
-                    CASE 
-                        WHEN SUM(CASE WHEN L.TRCODE = 1 THEN ISNULL(L.AMOUNT, 0) ELSE 0 END) = 0 
-                        THEN 0
-                        ELSE
-                            SUM(CASE WHEN L.TRCODE = 1 THEN ISNULL(L.AMOUNT, 0) * ISNULL(L.PRICE, 0) ELSE 0 END)
-                            /
-                            SUM(CASE WHEN L.TRCODE = 1 THEN ISNULL(L.AMOUNT, 0) ELSE 0 END)
-                    END AS OrtalamaMaliyet
-
-                FROM LG_001_ITEMS IT
-
-                LEFT JOIN LG_001_01_STLINE L
-                    ON L.STOCKREF = IT.LOGICALREF
-                   AND L.LINETYPE = 0
-                   AND L.TRCODE IN (1,7,8)
-
-                WHERE
-                    ISNULL(IT.NAME, '') <> ''
-                    AND ISNULL(IT.CODE, '') <> ''
-                    AND ISNULL(IT.CARDTYPE, 0) <> 22
-
-                GROUP BY
-                    IT.LOGICALREF,
-                    IT.CODE,
-                    IT.NAME
-
-                ORDER BY MevcutStok DESC
-            ";
-
-            DataTable dt = sql.selectDataTable();
-
-            foreach (DataRow dr in dt.Rows)
-            {
-                decimal mevcut = Convert.ToDecimal(dr["MevcutStok"]);
-                decimal ortalamaMaliyet = Convert.ToDecimal(dr["OrtalamaMaliyet"]);
-                decimal stokDegeri = mevcut * ortalamaMaliyet;
-
-                string stokDurumu =
-                    mevcut <= 0 ? "Stok Yok" :
-                    mevcut <= kritikSeviye ? "Kritik" :
-                    "Yeterli";
-
-                stoklar.Add(new InventoryReportRow
-                {
-                    StockRef = Convert.ToInt32(dr["StockRef"]),
-                    StokKodu = dr["StokKodu"].ToString() ?? "",
-                    StokAdi = dr["StokAdi"].ToString() ?? "",
-
-                    GirenMiktar = Convert.ToDecimal(dr["GirenMiktar"]),
-                    CikanMiktar = Convert.ToDecimal(dr["CikanMiktar"]),
-                    MevcutStok = mevcut,
-
-                    OrtalamaMaliyet = ortalamaMaliyet,
-                    StokDegeri = stokDegeri,
-                    StokDurumu = stokDurumu
-                });
-            }
-
-            return new InventoryReportViewModel
-            {
-                Stoklar = stoklar,
-                ToplamStokDegeri = stoklar.Sum(x => x.StokDegeri),
-                ToplamUrunSayisi = stoklar.Count,
-                KritikStokSayisi = stoklar.Count(x => x.StokDurumu == "Kritik"),
-                StokYokSayisi = stoklar.Count(x => x.StokDurumu == "Stok Yok")
-            };
-        }
 
         private ReportDashboardCard KartOlustur(decimal simdiki, decimal onceki)
         {
@@ -394,57 +329,72 @@ namespace Reporting.Services
             return ciro == 0 ? 0 : (kar / ciro) * 100;
         }
 
+       
+
         private List<SalesProfitReportRow> PeriyodaGoreFiltrele(
-            List<SalesProfitReportRow> liste,
-            string periyot)
+                    List<SalesProfitReportRow> liste,
+                    ReportFilter filter)
         {
-            DateTime bugun = DateTime.Today;
+            string periyot = string.IsNullOrWhiteSpace(filter.Periyot)
+                ? "gunluk"
+                : filter.Periyot;
 
-            DateTime haftaBaslangic = bugun.AddDays(
-                bugun.DayOfWeek == DayOfWeek.Sunday
-                    ? -6
-                    : DayOfWeek.Monday - bugun.DayOfWeek
-            );
+            DateTime referansTarih = filter.BaslangicTarihi?.Date ?? DateTime.Today;
 
-            DateTime haftaBitis = haftaBaslangic.AddDays(6);
+            DateTime baslangic;
+            DateTime bitis;
 
             if (periyot == "gunluk")
             {
-                return liste
-                    .Where(x => x.Tarih.Date == bugun)
-                    .ToList();
+                baslangic = referansTarih;
+                bitis = referansTarih;
             }
-
-            if (periyot == "haftalik")
+            else if (periyot == "haftalik")
             {
-                return liste
-                    .Where(x => x.Tarih.Date >= haftaBaslangic &&
-                                x.Tarih.Date <= haftaBitis)
-                    .ToList();
-            }
+                baslangic = referansTarih.AddDays(
+                    referansTarih.DayOfWeek == DayOfWeek.Sunday
+                        ? -6
+                        : DayOfWeek.Monday - referansTarih.DayOfWeek
+                );
 
-            if (periyot == "aylik")
+                bitis = baslangic.AddDays(6);
+            }
+            else if (periyot == "aylik")
             {
-                return liste
-                    .Where(x => x.Tarih.Year == bugun.Year &&
-                                x.Tarih.Month == bugun.Month)
-                    .ToList();
+                baslangic = new DateTime(referansTarih.Year, referansTarih.Month, 1);
+                bitis = baslangic.AddMonths(1).AddDays(-1);
             }
-
-            if (periyot == "yillik")
+            else if (periyot == "yillik")
             {
-                return liste
-                    .Where(x => x.Tarih.Year == bugun.Year)
-                    .ToList();
+                baslangic = new DateTime(referansTarih.Year, 1, 1);
+                bitis = new DateTime(referansTarih.Year, 12, 31);
+            }
+            else if (periyot == "ozel")
+            {
+                baslangic = filter.BaslangicTarihi?.Date ?? referansTarih;
+                bitis = filter.BitisTarihi?.Date ?? baslangic;
+            }
+            else
+            {
+                baslangic = DateTime.MinValue;
+                bitis = DateTime.MaxValue;
             }
 
-            return liste;
+            return liste
+                .Where(x => x.Tarih.Date >= baslangic &&
+                            x.Tarih.Date <= bitis)
+                .ToList();
         }
+
 
         private List<SalesProfitReportRow> OncekiPeriyodaGoreFiltrele(
             List<SalesProfitReportRow> liste,
-            string periyot)
+            ReportFilter filter)
         {
+            string periyot = string.IsNullOrWhiteSpace(filter.Periyot)
+        ? "aylik"
+        : filter.Periyot;
+
             DateTime bugun = DateTime.Today;
 
             DateTime haftaBaslangic = bugun.AddDays(
@@ -491,14 +441,48 @@ namespace Reporting.Services
                     .Where(x => x.Tarih.Year == oncekiYil.Year)
                     .ToList();
             }
+            if (periyot == "ozel" &&
+                filter.BaslangicTarihi.HasValue &&
+                filter.BitisTarihi.HasValue)
+            {
+                DateTime baslangic = filter.BaslangicTarihi.Value.Date;
+                DateTime bitis = filter.BitisTarihi.Value.Date;
+
+                int gunSayisi = (bitis - baslangic).Days + 1;
+
+                DateTime oncekiBitis = baslangic.AddDays(-1);
+                DateTime oncekiBaslangic = oncekiBitis.AddDays(-(gunSayisi - 1));
+
+                return liste
+                    .Where(x => x.Tarih.Date >= oncekiBaslangic &&
+                                x.Tarih.Date <= oncekiBitis)
+                    .ToList();
+            }
 
             return new List<SalesProfitReportRow>();
         }
-
+       
         private List<SalesReportSummaryRow> OzetRaporOlustur(
             List<SalesProfitReportRow> liste,
             string periyot)
         {
+            if (periyot == "ozel")
+            {
+                return liste
+                    .GroupBy(x => x.Tarih.Date)
+                    .Select(g => new SalesReportSummaryRow
+                    {
+                        Tarih = g.Key,
+                        Baslik = g.Key.ToString("dd.MM.yyyy"),
+                        Ciro = g.Sum(x => x.Ciro),
+                        Maliyet = g.Sum(x => x.Maliyet),
+                        Kar = g.Sum(x => x.Kar),
+                        KarOrani = OranHesapla(g.Sum(x => x.Kar), g.Sum(x => x.Ciro))
+                    })
+                    .OrderBy(x => x.Tarih)
+                    .ToList();
+            }
+
             if (periyot == "haftalik")
             {
                 return liste

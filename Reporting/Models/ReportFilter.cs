@@ -12,6 +12,7 @@ namespace Reporting.Models
 
         public DateTime? BitisTarihi { get; set; }
 
+
         public string Periyot { get; set; } = "gunluk";
         public int? CariRef { get; set; }
 
