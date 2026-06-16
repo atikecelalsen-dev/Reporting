@@ -10,9 +10,9 @@ namespace Reporting.Models
     {
         public List<InventoryReportRow> Stoklar { get; set; } = new();
 
-        //public List<InventoryReportRow> KritikStoklar { get; set; } = new();
+        public List<InventoryReportRow> KritikStoklar { get; set; } = new();
 
-        //public List<InventoryReportRow> StokYoklar { get; set; } = new();
+        public List<InventoryReportRow> StokYoklar { get; set; } = new();
 
         public decimal ToplamStokDegeri { get; set; }
 

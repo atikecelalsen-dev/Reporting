@@ -4,14 +4,14 @@ using System.Data;
 
 namespace Reporting.Services
 {
-    public class InventoryReportService
+    public class StockAndInventoryReportService
     { 
         private readonly string _connectionString;
 
         private readonly string _firmaNo;
         private readonly string _donemNo;
 
-        public InventoryReportService(string connectionString, string firmaNo, string donemNo)
+        public StockAndInventoryReportService(string connectionString, string firmaNo, string donemNo)
         {
             _connectionString = connectionString;
             _firmaNo = firmaNo;
